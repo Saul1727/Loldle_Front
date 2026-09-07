@@ -1,6 +1,6 @@
 import { Client } from "@stomp/stompjs";
 import type { IMessage, StompSubscription } from "@stomp/stompjs";
-import * as SockJS from "sockjs-client";
+import SockJS from "sockjs-client";
 import { WS_BASE_URL, type GuessBroadcast, type Room } from "./api";
 
 // Un mensaje en /topic/rooms/{code} es o bien una actualizacion de la sala (alguien
@@ -30,7 +30,7 @@ export class RoomSocket {
     const token = localStorage.getItem("loldle_token") ?? "";
 
     this.client = new Client({
-      webSocketFactory: () => new (SockJS as unknown as { new (url: string): WebSocket })(`${WS_BASE_URL}/ws`),
+      webSocketFactory: () => new SockJS(`${WS_BASE_URL}/ws`),
       connectHeaders: { Authorization: `Bearer ${token}` },
       reconnectDelay: 3000,
       onConnect: () => {
