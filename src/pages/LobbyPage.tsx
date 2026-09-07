@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { motion } from "framer-motion";
-import { Brain, Copy, Check, LogOut, Sparkles, Image as ImageIcon, Loader2, Swords } from "lucide-react";
+import { Brain, Copy, Check, LogOut, Sparkles, Image as ImageIcon, Loader2, Swords, User } from "lucide-react";
 import { HextechPanel } from "../components/HextechPanel";
 import { HextechButton } from "../components/HextechButton";
+import { GameBoard } from "../components/GameBoard";
 import { ApiError, createRoom, getRoom, joinRoom, type GameMode, type Room } from "../lib/api";
 
 const MODES: { id: GameMode; label: string; description: string; icon: typeof Brain }[] = [
@@ -70,6 +71,19 @@ export function LobbyPage({ username, onLogout }: { username: string; onLogout: 
     }
   }
 
+  async function handleCreateSolo() {
+    setError(null);
+    setBusy(true);
+    try {
+      const created = await createRoom(selectedMode, true);
+      setRoom(created);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo empezar la partida en solitario");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleJoin(event: FormEvent) {
     event.preventDefault();
     setError(null);
@@ -110,7 +124,11 @@ export function LobbyPage({ username, onLogout }: { username: string; onLogout: 
       </header>
 
       {room ? (
-        <WaitingRoom room={room} onCopy={copyCode} copied={copied} />
+        room.status === "WAITING" ? (
+          <WaitingRoom room={room} onCopy={copyCode} copied={copied} />
+        ) : (
+          <GameBoard room={room} username={username} onExit={() => setRoom(null)} />
+        )
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
@@ -151,7 +169,7 @@ export function LobbyPage({ username, onLogout }: { username: string; onLogout: 
             })}
           </div>
 
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-6 sm:grid-cols-3">
             <HextechPanel className="flex flex-col gap-4 p-6">
               <h2 className="font-display text-lg font-semibold text-gold-100">Crear sala</h2>
               <p className="text-sm text-gold-200/60">
@@ -177,6 +195,18 @@ export function LobbyPage({ username, onLogout }: { username: string; onLogout: 
                 </HextechButton>
               </form>
             </HextechPanel>
+
+            <HextechPanel className="flex flex-col gap-4 p-6">
+              <h2 className="flex items-center gap-2 font-display text-lg font-semibold text-gold-100">
+                <User className="h-4 w-4 text-teal-300" /> Solo infinito
+              </h2>
+              <p className="text-sm text-gold-200/60">
+                Sin rival: adivina en modo {MODES.find((m) => m.id === selectedMode)?.label} y encadena partidas seguidas.
+              </p>
+              <HextechButton variant="ghost" onClick={handleCreateSolo} disabled={busy} className="mt-auto w-full">
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Jugar solo"}
+              </HextechButton>
+            </HextechPanel>
           </div>
 
           {error && (
@@ -199,17 +229,11 @@ function WaitingRoom({ room, onCopy, copied }: { room: Room; onCopy: () => void;
       className="mx-auto max-w-md"
     >
       <HextechPanel className="flex flex-col items-center gap-5 p-10 text-center">
-        {room.status === "WAITING" ? (
-          <>
-            <span className="relative flex h-3 w-3">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-60" />
-              <span className="relative inline-flex h-3 w-3 rounded-full bg-teal-400" />
-            </span>
-            <p className="text-sm uppercase tracking-widest text-gold-200/60">Esperando rival</p>
-          </>
-        ) : (
-          <p className="text-sm uppercase tracking-widest text-teal-300">Duelo en marcha</p>
-        )}
+        <span className="relative flex h-3 w-3">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-60" />
+          <span className="relative inline-flex h-3 w-3 rounded-full bg-teal-400" />
+        </span>
+        <p className="text-sm uppercase tracking-widest text-gold-200/60">Esperando rival</p>
 
         <button
           onClick={onCopy}
