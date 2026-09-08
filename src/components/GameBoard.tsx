@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { ArrowDown, ArrowUp, Crown, Flag, Loader2, LogOut, RotateCcw } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowDown, ArrowUp, Crown, Flag, Loader2, LogOut, RotateCcw, Swords } from "lucide-react";
 import { HextechPanel } from "./HextechPanel";
 import { HextechButton } from "./HextechButton";
 import { ChampionAutocomplete } from "./ChampionAutocomplete";
+import { ChampionIcon } from "./ChampionIcon";
 import {
   ApiError,
   abandonRoom,
@@ -28,6 +29,10 @@ import {
   speciesLabel,
 } from "../lib/championLabels";
 
+const EASE_OUT = [0.23, 1, 0.32, 1] as const;
+
+type LiveGuess = GuessBroadcast & { id: number };
+
 // El tablero real de una partida (1v1 o solo): historial de intentos en vivo por
 // WebSocket, mas el estado inicial por REST para poder reconstruirlo si se recarga
 // la pagina o se entra despues de que ya haya intentos hechos.
@@ -37,7 +42,7 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
   const isSolo = initialRoom.solo;
 
   const [room, setRoom] = useState(initialRoom);
-  const [guesses, setGuesses] = useState<GuessBroadcast[]>([]);
+  const [guesses, setGuesses] = useState<LiveGuess[]>([]);
   const [championNames, setChampionNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +50,7 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
   const [hintUrl, setHintUrl] = useState<string | null>(null);
   const socketRef = useRef<RoomSocket | null>(null);
   const hintUrlRef = useRef<string | null>(null);
+  const nextGuessId = useRef(0);
 
   async function loadHint() {
     if (gameMode === "CLASSIC") return;
@@ -65,7 +71,8 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
         const [state, names] = await Promise.all([getRoomState(code), getChampionNames()]);
         if (cancelled) return;
         setRoom(state.room);
-        setGuesses([...state.guesses].reverse());
+        const ordered = [...state.guesses].reverse().map((g) => ({ ...g, id: nextGuessId.current++ }));
+        setGuesses(ordered);
         setChampionNames(names);
         await loadHint();
       } catch (err) {
@@ -95,7 +102,7 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
       },
       onGuess: (guess) => {
         setPending(false);
-        setGuesses((prev) => [guess, ...prev]);
+        setGuesses((prev) => [{ ...guess, id: nextGuessId.current++ }, ...prev]);
         setRoom((prev) => ({
           ...prev,
           status: guess.roomFinished ? "FINISHED" : prev.status,
@@ -193,6 +200,7 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
   }
 
   const won = room.status === "FINISHED" && (isSolo || room.winnerUsername?.toLowerCase() === username.toLowerCase());
+  const revealedName = won && isSolo ? guesses.find((g) => g.result?.correctGuess)?.result?.guessedChampion : null;
 
   if (loading) {
     return (
@@ -206,77 +214,36 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.23, 1, 0.32, 1] }}
+      transition={{ duration: 0.35, ease: EASE_OUT }}
       className="mx-auto flex max-w-3xl flex-col gap-5"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-widest text-gold-200/50">
-            {isSolo ? "Solo infinito" : `${room.hostUsername} vs ${room.guestUsername ?? "?"}`}
-          </p>
-          <p className="font-display text-lg font-semibold text-gold-100">
-            {gameMode === "CLASSIC" ? "Clasico" : gameMode === "ABILITY" ? "Habilidad" : "Splash Art"}
-          </p>
-        </div>
-        {!isSolo && room.status === "IN_PROGRESS" && (
-          <p className="text-sm uppercase tracking-widest">
-            {isMyTurn ? (
-              <span className="text-teal-300">Tu turno</span>
-            ) : (
-              <span className="text-gold-200/60">Turno de {opponentUsername ?? "tu rival"}</span>
-            )}
-          </p>
-        )}
-      </div>
+      <DuelBanner room={room} username={username} isSolo={isSolo} opponentUsername={opponentUsername} isMyTurn={isMyTurn} />
 
       {gameMode !== "CLASSIC" && (
-        <HextechPanel className="mx-auto flex w-full max-w-xs flex-col items-center gap-3 p-4">
-          <p className="text-xs uppercase tracking-widest text-gold-200/60">
-            {gameMode === "ABILITY" ? "Icono de habilidad" : "Splash art"}
-          </p>
-          <div className="h-40 w-40 overflow-hidden border border-gold-700/50 bg-void-950/70">
-            {hintUrl ? (
-              <img
-                src={hintUrl}
-                alt="Pista del campeon secreto"
-                className="h-full w-full object-cover"
-                style={
-                  gameMode === "SPLASH_ART"
-                    ? { transform: `scale(${Math.max(1, 3.2 - guesses.length * 0.4)})`, transition: "transform 0.4s ease-out" }
-                    : undefined
-                }
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-gold-300" />
-              </div>
-            )}
-          </div>
-        </HextechPanel>
+        <HintPanel gameMode={gameMode} hintUrl={hintUrl} guessCount={guesses.length} />
       )}
 
-      {isTerminal && (
-        <HextechPanel className="flex flex-col items-center gap-4 p-6 text-center">
-          {won ? (
-            <Crown className="h-7 w-7 text-teal-300" strokeWidth={1.5} />
-          ) : (
-            <Flag className="h-7 w-7 text-gold-300" strokeWidth={1.5} />
-          )}
-          <p className="font-display text-lg font-semibold text-gold-100">{endMessage()}</p>
-          <div className="flex flex-wrap justify-center gap-3">
-            <HextechButton onClick={handleRematch} disabled={pending}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-              {isSolo ? "Otra partida" : "Revancha"}
-            </HextechButton>
-            <HextechButton variant="ghost" onClick={handleLeave} disabled={pending}>
-              <LogOut className="h-4 w-4" /> Salir
-            </HextechButton>
-          </div>
-        </HextechPanel>
-      )}
+      <AnimatePresence mode="wait">
+        {isTerminal && (
+          <EndBanner
+            key={room.status}
+            won={won}
+            message={endMessage()}
+            revealedName={revealedName}
+            isSolo={isSolo}
+            pending={pending}
+            onRematch={handleRematch}
+            onLeave={handleLeave}
+          />
+        )}
+      </AnimatePresence>
 
       {room.status === "IN_PROGRESS" && (
-        <HextechPanel className="flex flex-col gap-3 p-4">
+        <HextechPanel
+          className={`flex flex-col gap-3 p-4 transition-shadow duration-300 ${
+            isMyTurn ? "shadow-[0_0_34px_-10px_rgba(10,200,185,0.45)]" : ""
+          }`}
+        >
           <ChampionAutocomplete names={championNames} disabled={!isMyTurn || pending} onGuess={handleGuess} />
           <div className="flex items-center justify-between">
             {!isMyTurn && !isSolo && <p className="text-xs text-gold-200/50">Espera tu turno...</p>}
@@ -292,15 +259,25 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
         </HextechPanel>
       )}
 
-      {error && (
-        <p className="border border-blood-500/40 bg-blood-500/10 px-4 py-2 text-center text-sm text-blood-500">{error}</p>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.p
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="border border-blood-500/40 bg-blood-500/10 px-4 py-2 text-center text-sm text-blood-500"
+          >
+            {error}
+          </motion.p>
+        )}
+      </AnimatePresence>
 
       {guesses.length > 0 && (
         <div className="overflow-x-auto">
-          <div className="flex min-w-[640px] flex-col gap-1.5">
+          <div className="flex min-w-[680px] flex-col gap-1.5">
             {gameMode === "CLASSIC" && (
-              <div className="grid grid-cols-8 gap-1.5 px-1 text-[10px] uppercase tracking-wider text-gold-200/50">
+              <div className="grid grid-cols-[minmax(9rem,1.3fr)_repeat(7,1fr)] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-gold-200/50">
                 <span>Campeon</span>
                 <span>Genero</span>
                 <span>Posicion</span>
@@ -311,12 +288,201 @@ export function GameBoard({ room: initialRoom, username, onExit }: { room: Room;
                 <span>Año</span>
               </div>
             )}
-            {guesses.map((guess, index) => (
-              <GuessRow key={`${guess.username}-${index}`} guess={guess} mode={gameMode} showUsername={!isSolo} />
+            {guesses.map((guess) => (
+              <GuessRow key={guess.id} guess={guess} mode={gameMode} showUsername={!isSolo} />
             ))}
           </div>
         </div>
       )}
+    </motion.div>
+  );
+}
+
+function DuelBanner({
+  room,
+  username,
+  isSolo,
+  opponentUsername,
+  isMyTurn,
+}: {
+  room: Room;
+  username: string;
+  isSolo: boolean;
+  opponentUsername: string | null;
+  isMyTurn: boolean;
+}) {
+  const modeLabel = room.gameMode === "CLASSIC" ? "Clasico" : room.gameMode === "ABILITY" ? "Habilidad" : "Splash Art";
+
+  if (isSolo) {
+    return (
+      <div className="flex flex-col items-center gap-1 text-center">
+        <p className="flex items-center gap-2 text-xs uppercase tracking-[0.25em] text-gold-200/50">
+          <Swords className="h-3.5 w-3.5 text-teal-300" strokeWidth={1.5} /> Solo infinito
+        </p>
+        <p className="font-display text-2xl font-bold text-gold-100">{modeLabel}</p>
+      </div>
+    );
+  }
+
+  const hostIsMe = room.hostUsername.toLowerCase() === username.toLowerCase();
+  const myTurnSide = hostIsMe ? "host" : "guest";
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <p className="text-xs uppercase tracking-[0.25em] text-gold-200/50">{modeLabel}</p>
+      <div className="flex w-full items-center justify-center gap-4 sm:gap-8">
+        <PlayerChip
+          label={room.hostUsername}
+          isYou={hostIsMe}
+          active={room.status === "IN_PROGRESS" && isMyTurn === (myTurnSide === "host")}
+        />
+        <span className="font-display text-lg font-bold tracking-widest text-gold-300/70">VS</span>
+        <PlayerChip
+          label={opponentUsername ?? room.guestUsername ?? "?"}
+          isYou={!hostIsMe}
+          active={room.status === "IN_PROGRESS" && isMyTurn === (myTurnSide === "guest")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PlayerChip({ label, isYou, active }: { label: string; isYou: boolean; active: boolean }) {
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="relative flex h-11 w-11 items-center justify-center">
+        {active && <span className="absolute inset-0 animate-ping rounded-full bg-teal-400/25" />}
+        <div
+          className={`relative flex h-11 w-11 items-center justify-center rounded-full border font-display text-lg font-bold transition-colors duration-300 ${
+            active
+              ? "border-teal-400/80 bg-teal-400/10 text-teal-200 shadow-[0_0_18px_-4px_rgba(10,200,185,0.6)]"
+              : "border-gold-700/50 bg-void-950/60 text-gold-200/70"
+          }`}
+        >
+          {label.charAt(0).toUpperCase()}
+        </div>
+      </div>
+      <span className={`text-xs font-semibold ${active ? "text-teal-300" : "text-gold-200/60"}`}>
+        {label}
+        {isYou ? " (tu)" : ""}
+      </span>
+    </div>
+  );
+}
+
+function HintPanel({
+  gameMode,
+  hintUrl,
+  guessCount,
+}: {
+  gameMode: Room["gameMode"];
+  hintUrl: string | null;
+  guessCount: number;
+}) {
+  return (
+    <HextechPanel className="mx-auto flex w-full max-w-xs flex-col items-center gap-3 p-4">
+      <p className="text-xs uppercase tracking-widest text-gold-200/60">
+        {gameMode === "ABILITY" ? "Icono de habilidad" : "Splash art"}
+      </p>
+      <div className="relative h-40 w-40 overflow-hidden rounded-sm border border-gold-700/50 bg-void-950/70">
+        <AnimatePresence mode="wait">
+          {hintUrl ? (
+            <motion.img
+              key={hintUrl}
+              src={hintUrl}
+              alt="Pista del campeon secreto"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+              className="h-full w-full object-cover"
+              style={
+                gameMode === "SPLASH_ART"
+                  ? { transform: `scale(${Math.max(1, 3.2 - guessCount * 0.4)})`, transition: "transform 0.4s ease-out" }
+                  : undefined
+              }
+            />
+          ) : (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex h-full w-full items-center justify-center"
+            >
+              <Loader2 className="h-5 w-5 animate-spin text-gold-300" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_28px_rgba(0,0,0,0.55)]" />
+      </div>
+    </HextechPanel>
+  );
+}
+
+function EndBanner({
+  won,
+  message,
+  revealedName,
+  isSolo,
+  pending,
+  onRematch,
+  onLeave,
+}: {
+  won: boolean;
+  message: string;
+  revealedName?: string | null;
+  isSolo: boolean;
+  pending: boolean;
+  onRematch: () => void;
+  onLeave: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ duration: 0.3, ease: EASE_OUT }}
+    >
+      <HextechPanel
+        className={`relative flex flex-col items-center gap-4 overflow-hidden p-6 text-center ${
+          won ? "border-teal-400/50" : "border-blood-500/40"
+        }`}
+      >
+        {won && (
+          <motion.div
+            initial={{ x: "-130%" }}
+            animate={{ x: "130%" }}
+            transition={{ duration: 1.1, ease: EASE_OUT }}
+            className="pointer-events-none absolute inset-y-0 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-teal-300/15 to-transparent"
+          />
+        )}
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.35, delay: 0.05, ease: EASE_OUT }}
+        >
+          {won ? (
+            <Crown className="h-8 w-8 text-teal-300" strokeWidth={1.5} />
+          ) : (
+            <Flag className="h-8 w-8 text-blood-500/80" strokeWidth={1.5} />
+          )}
+        </motion.div>
+        <div>
+          <p className="font-display text-lg font-semibold text-gold-100">{message}</p>
+          {revealedName && !message.includes(revealedName) && (
+            <p className="mt-1 text-sm text-gold-200/60">Era {revealedName}.</p>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <HextechButton onClick={onRematch} disabled={pending}>
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+            {isSolo ? "Otra partida" : "Revancha"}
+          </HextechButton>
+          <HextechButton variant="ghost" onClick={onLeave} disabled={pending}>
+            <LogOut className="h-4 w-4" /> Salir
+          </HextechButton>
+        </div>
+      </HextechPanel>
     </motion.div>
   );
 }
@@ -334,26 +500,48 @@ function cellClasses(result?: MatchResult) {
   }
 }
 
-function Cell({ label, result, bold }: { label: string; result?: MatchResult; bold?: boolean }) {
+function Cell({ label, result, delay = 0 }: { label: string; result?: MatchResult; delay?: number }) {
   return (
-    <div
-      className={`flex min-h-[3rem] items-center justify-center border px-1.5 py-1 text-center text-xs ${cellClasses(result)} ${
-        bold ? "font-display font-semibold" : ""
-      }`}
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.18, delay, ease: EASE_OUT }}
+      className={`flex min-h-[3rem] items-center justify-center border px-1.5 py-1 text-center text-xs ${cellClasses(result)}`}
     >
       {label}
-    </div>
+    </motion.div>
   );
 }
 
-function YearCell({ fieldResult, hint }: { fieldResult?: FieldResult<number> | null; hint?: YearHint | null }) {
-  if (!fieldResult) return <Cell label="?" />;
+function NameCell({ name, correct, delay = 0 }: { name: string; correct: boolean; delay?: number }) {
   return (
-    <div className={`flex min-h-[3rem] items-center justify-center gap-1 border px-1.5 py-1 text-xs ${cellClasses(fieldResult.result)}`}>
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.18, delay, ease: EASE_OUT }}
+      className={`flex min-h-[3rem] items-center gap-2 border px-2 py-1 text-xs font-display font-semibold ${cellClasses(
+        correct ? "CORRECT" : "INCORRECT"
+      )}`}
+    >
+      <ChampionIcon name={name} size={28} />
+      <span className="truncate">{name}</span>
+    </motion.div>
+  );
+}
+
+function YearCell({ fieldResult, hint, delay = 0 }: { fieldResult?: FieldResult<number> | null; hint?: YearHint | null; delay?: number }) {
+  if (!fieldResult) return <Cell label="?" delay={delay} />;
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.18, delay, ease: EASE_OUT }}
+      className={`flex min-h-[3rem] items-center justify-center gap-1 border px-1.5 py-1 text-xs ${cellClasses(fieldResult.result)}`}
+    >
       <span>{fieldResult.value}</span>
       {hint === "HIGHER" && <ArrowUp className="h-3.5 w-3.5" />}
       {hint === "LOWER" && <ArrowDown className="h-3.5 w-3.5" />}
-    </div>
+    </motion.div>
   );
 }
 
@@ -370,16 +558,20 @@ function GuessRow({
 
   if (mode !== "CLASSIC") {
     return (
-      <div
-        className={`flex items-center justify-between border px-4 py-2.5 text-sm ${
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, ease: EASE_OUT }}
+        className={`flex items-center gap-3 border px-3 py-2 text-sm ${
           r?.correctGuess
             ? "border-teal-400/60 bg-teal-400/15 text-teal-100"
             : "border-blood-500/40 bg-blood-500/10 text-blood-400"
         }`}
       >
-        <span>{r?.guessedChampion ?? "?"}</span>
+        {r?.guessedChampion && <ChampionIcon name={r.guessedChampion} size={30} />}
+        <span className="flex-1">{r?.guessedChampion ?? "?"}</span>
         {showUsername && <span className="text-xs text-gold-200/50">{guess.username}</span>}
-      </div>
+      </motion.div>
     );
   }
 
@@ -388,18 +580,27 @@ function GuessRow({
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: EASE_OUT }}
+      className="flex flex-col gap-1"
+    >
       {showUsername && <span className="px-1 text-[10px] uppercase tracking-wider text-gold-200/40">{guess.username}</span>}
-      <div className="grid grid-cols-8 gap-1.5">
-        <Cell label={r.guessedChampion} result={r.correctGuess ? "CORRECT" : "INCORRECT"} bold />
-        <Cell label={genderLabel(r.gender?.value)} result={r.gender?.result} />
-        <Cell label={(r.positions?.value ?? []).map(positionLabel).join(" / ") || "?"} result={r.positions?.result} />
-        <Cell label={speciesLabel(r.species?.value)} result={r.species?.result} />
-        <Cell label={resourceLabel(r.resource?.value)} result={r.resource?.result} />
-        <Cell label={rangeTypeLabel(r.rangeType?.value)} result={r.rangeType?.result} />
-        <Cell label={regionLabel(r.region?.value)} result={r.region?.result} />
-        <YearCell fieldResult={r.year} hint={r.yearHint} />
+      <div className="grid grid-cols-[minmax(9rem,1.3fr)_repeat(7,1fr)] gap-1.5">
+        <NameCell name={r.guessedChampion} correct={r.correctGuess} delay={0} />
+        <Cell label={genderLabel(r.gender?.value)} result={r.gender?.result} delay={0.02} />
+        <Cell
+          label={(r.positions?.value ?? []).map(positionLabel).join(" / ") || "?"}
+          result={r.positions?.result}
+          delay={0.04}
+        />
+        <Cell label={speciesLabel(r.species?.value)} result={r.species?.result} delay={0.06} />
+        <Cell label={resourceLabel(r.resource?.value)} result={r.resource?.result} delay={0.08} />
+        <Cell label={rangeTypeLabel(r.rangeType?.value)} result={r.rangeType?.result} delay={0.1} />
+        <Cell label={regionLabel(r.region?.value)} result={r.region?.result} delay={0.12} />
+        <YearCell fieldResult={r.year} hint={r.yearHint} delay={0.14} />
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { HextechButton } from "./HextechButton";
+import { ChampionIcon } from "./ChampionIcon";
 
 // Campo de texto con desplegable de sugerencias para escribir un intento. Solo deja
 // mandar un nombre que exista de verdad en la lista de campeones (comparacion sin
@@ -98,10 +99,11 @@ export function ChampionAutocomplete({
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => commit(name)}
-                className={`block w-full px-3 py-2 text-left text-sm transition-colors duration-100 ${
+                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors duration-100 ${
                   index === highlight ? "bg-teal-400/15 text-teal-200" : "text-gold-100 hover:bg-gold-700/10"
                 }`}
               >
+                <ChampionIcon name={name} size={22} />
                 {name}
               </button>
             </li>

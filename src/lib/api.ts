@@ -162,6 +162,13 @@ export function getChampionNames() {
   return request<string[]>("/api/champion/names");
 }
 
+// Icono cuadrado de un campeon ya nombrado (el que se acaba de adivinar, nunca el
+// secreto de una sala): es publico y sin JWT, asi que se puede usar directamente
+// como src de un <img> normal y dejar que el navegador lo cachee por URL.
+export function championIconUrl(name: string) {
+  return apiUrl(`/api/champion/${encodeURIComponent(name)}/icon`);
+}
+
 // La imagen "pista" (icono de habilidad o splash art) va protegida por JWT, asi que
 // no se puede usar directamente como src de un <img>: se pide con fetch y se
 // convierte en un object URL. Devuelve null si el modo no tiene pista (404, p.ej.
